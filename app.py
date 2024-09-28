@@ -1,13 +1,18 @@
 import streamlit as st
 import os
-from dotenv import load_dotenv
+from openai import OpenAI
+
+# Streamlit Cloud에서는 .env 파일을 사용하지 않으므로 조건부로 import
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # Streamlit Cloud에서는 이 부분을 무시합니다
+
 from openai import OpenAI
 
 # Streamlit 설정
 st.set_page_config(page_title="Academic Writing Feedback AI", page_icon="📝")
-
-# .env 파일에서 환경 변수 로드 (개발 환경용)
-load_dotenv()
 
 # API 키 설정 (Streamlit Cloud에서는 st.secrets 사용)
 api_key = st.secrets["OPENAI_API_KEY"] if "OPENAI_API_KEY" in st.secrets else os.getenv("OPENAI_API_KEY")

@@ -1,79 +1,135 @@
 import streamlit as st
 import os
 from openai import OpenAI
+import logging
+from dotenv import load_dotenv
 
-# Streamlit Cloud에서는 .env 파일을 사용하지 않으므로 조건부로 import
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass  # Streamlit Cloud에서는 이 부분을 무시합니다
+# 환경 변수 로드
+load_dotenv()
 
-from openai import OpenAI
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
 
 # Streamlit 설정
-st.set_page_config(page_title="Academic Writing Feedback AI", page_icon="📝")
+st.set_page_config(page_title="Academic Writing Improvement AI", page_icon="📝")
 
-# API 키 설정 (Streamlit Cloud에서는 st.secrets 사용)
-api_key = st.secrets["OPENAI_API_KEY"] if "OPENAI_API_KEY" in st.secrets else os.getenv("OPENAI_API_KEY")
+def init_openai_client():
+    """OpenAI 클라이언트를 초기화하고 반환합니다."""
+    try:
+        api_key = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            st.error("OpenAI API 키가 설정되지 않았습니다. Streamlit Secrets 또는 환경 변수를 확인해주세요.")
+            st.stop()
+        return OpenAI(api_key=api_key)
+    except Exception as e:
+        st.error(f"OpenAI 클라이언트 초기화 중 오류가 발생했습니다: {str(e)}")
+        logging.error(f"OpenAI 클라이언트 초기화 오류: {str(e)}")
+        st.stop()
 
 # OpenAI 클라이언트 초기화
-client = OpenAI(api_key=api_key)
+client = init_openai_client()
 
 # 파인튜닝된 모델 ID
-MODEL_ID = st.secrets.get("MODEL_ID", "ft:gpt-3.5-turbo-0613:your-org:your-model-name:your-version")
+MODEL_ID = st.secrets.get("MODEL_ID") or os.getenv("MODEL_ID")
+if not MODEL_ID:
+    st.error("MODEL_ID가 설정되지 않았습니다. Streamlit Secrets 또는 환경 변수를 확인해주세요.")
+    st.stop()
 
 @st.cache_data
-def get_feedback(text, language):
+def improve_text(text, language):
+    """주어진 텍스트를 개선하고 피드백을 제공합니다."""
     try:
         system_message = (
-            "You are an experienced professor providing feedback on academic writing. "
-            f"Provide specific and constructive feedback in {language}. "
-            "Focus on improving the structure, argumentation, and use of evidence in the text."
+            "You are an AI assistant specializing in improving academic writing. "
+            f"Provide an improved version of the input text and feedback in {language}. "
+            "Focus on enhancing clarity, coherence, and academic style. "
+            "Your response should be in the following format:\n"
+            "Improved version: [Your improved text here]\n"
+            "Feedback: [Specific and constructive feedback, including explanations of the changes]"
         )
         
         response = client.chat.completions.create(
             model=MODEL_ID,
             messages=[
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": f"Please review the following text and suggest improvements: {text}"}
+                {"role": "user", "content": f"Please improve this text and provide feedback: {text}"}
             ],
             max_tokens=1000
         )
         return response.choices[0].message.content
     except Exception as e:
-        st.error(f"An error occurred while generating feedback: {str(e)}")
+        error_message = f"텍스트 개선 및 피드백 생성 중 오류가 발생했습니다: {str(e)}"
+        if "model_not_found" in str(e):
+            error_message += "\n모델 ID가 올바른지 확인하고, OpenAI 대시보드에서 모델 상태를 확인해주세요."
+        elif "invalid_api_key" in str(e):
+            error_message += "\nAPI 키가 올바른지 확인해주세요."
+        st.error(error_message)
+        logging.error(f"텍스트 개선 및 피드백 생성 오류: {str(e)}")
         return None
 
-st.title("📝 Academic Writing Feedback AI")
-
-# 언어 선택 옵션
-language = st.selectbox(
-    "Select feedback language / 피드백 언어 선택",
-    ("English", "한국어")
-)
-
-user_input = st.text_area("Enter the text you want feedback on / 피드백을 받고 싶은 텍스트를 입력하세요:", height=200)
-
-if st.button("Get Feedback / 피드백 받기"):
-    if user_input:
-        with st.spinner("Generating feedback / 피드백을 생성 중입니다..."):
-            feedback = get_feedback(user_input, language)
-        if feedback:
-            st.subheader("📌 Feedback / 피드백:")
-            st.write(feedback)
+def parse_result(result):
+    """결과를 파싱하여 개선된 버전과 피드백으로 분리합니다."""
+    improved_version = ""
+    feedback = ""
+    if "Improved version:" in result and "Feedback:" in result:
+        parts = result.split("Feedback:", 1)
+        improved_version = parts[0].replace("Improved version:", "").strip()
+        feedback = parts[1].strip()
+    elif "Improved version:" in result:
+        improved_version = result.replace("Improved version:", "").strip()
     else:
-        st.warning("Please enter some text / 텍스트를 입력해주세요.")
+        # 구분자가 없는 경우 전체 결과를 개선된 버전으로 취급
+        improved_version = result.strip()
+    return improved_version, feedback
 
-with st.sidebar:
-    st.header("ℹ️ How to Use / 사용 방법")
-    st.write("1. Select your preferred feedback language.")
-    st.write("2. Enter or paste the text you want feedback on.")
-    st.write("3. Click the 'Get Feedback' button.")
-    st.write("4. Review the AI-generated professor-style feedback.")
-    
-    st.header("🔒 Privacy / 개인정보 보호")
-    st.write("Your input is used only for generating feedback and is not stored.")
-    
-    st.header("ℹ️ Model Information / 모델 정보")
-    st.write(f"Current model in use / 현재 사용 중인 모델: {MODEL_ID}")
+def main():
+    st.title("📝 Academic Writing Improvement AI")
+
+    # 언어 선택 옵션
+    language = st.selectbox(
+        "Select language / 언어 선택",
+        ("English", "한국어")
+    )
+
+    user_input = st.text_area("Enter the text you want to improve / 개선하고 싶은 텍스트를 입력하세요:", height=200)
+
+    if st.button("Improve Text and Get Feedback / 텍스트 개선 및 피드백 받기"):
+        if user_input:
+            with st.spinner("Improving text and generating feedback / 텍스트 개선 및 피드백 생성 중..."):
+                result = improve_text(user_input, language)
+            if result:
+                improved_version, feedback = parse_result(result)
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.subheader("📌 Original Text / 원본 텍스트:")
+                    st.write(user_input)
+                
+                with col2:
+                    st.subheader("📌 Improved Version / 개선된 버전:")
+                    st.write(improved_version)
+                
+                if feedback:
+                    st.subheader("📌 Feedback / 피드백:")
+                    st.write(feedback)
+                else:
+                    st.info("No specific feedback provided. / 구체적인 피드백이 제공되지 않았습니다.")
+        else:
+            st.warning("Please enter some text / 텍스트를 입력해주세요.")
+
+    with st.sidebar:
+        st.header("ℹ️ How to Use / 사용 방법")
+        st.write("1. Select your preferred language.")
+        st.write("2. Enter or paste the text you want to improve.")
+        st.write("3. Click the 'Improve Text and Get Feedback' button.")
+        st.write("4. Review the improved version and feedback.")
+        
+        st.header("🔒 Privacy / 개인정보 보호")
+        st.write("Your input is used only for generating improvements and feedback, and is not stored.")
+        
+        st.header("ℹ️ Model Information / 모델 정보")
+        st.write(f"Current model in use / 현재 사용 중인 모델: {MODEL_ID}")
+
+if __name__ == "__main__":
+    main()

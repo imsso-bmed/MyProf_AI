@@ -56,6 +56,7 @@ def improve_text(text, language):
             ],
             max_tokens=1000
         )
+        logging.info(f"OpenAI API Response: {response.choices[0].message.content}")
         return response.choices[0].message.content
     except Exception as e:
         error_message = f"텍스트 개선 및 피드백 생성 중 오류가 발생했습니다: {str(e)}"
@@ -68,7 +69,7 @@ def improve_text(text, language):
         return None
 
 def parse_result(result):
-    """결과를 파싱하여 개선된 버전과 피드백으로 분리합니다."""
+    logging.info(f"Parsing result: {result}")
     improved_version = ""
     feedback = ""
     if "Improved version:" in result and "Feedback:" in result:
@@ -78,8 +79,9 @@ def parse_result(result):
     elif "Improved version:" in result:
         improved_version = result.replace("Improved version:", "").strip()
     else:
-        # 구분자가 없는 경우 전체 결과를 개선된 버전으로 취급
         improved_version = result.strip()
+    logging.info(f"Parsed improved version: {improved_version}")
+    logging.info(f"Parsed feedback: {feedback}")
     return improved_version, feedback
 
 def main():
@@ -94,12 +96,18 @@ def main():
     user_input = st.text_area("Enter the text you want to improve / 개선하고 싶은 텍스트를 입력하세요:", height=200)
 
     if st.button("Improve Text and Get Feedback / 텍스트 개선 및 피드백 받기"):
-        if user_input:
-            with st.spinner("Improving text and generating feedback / 텍스트 개선 및 피드백 생성 중..."):
-                result = improve_text(user_input, language)
-            if result:
-                improved_version, feedback = parse_result(result)
-                
+      if user_input:
+        with st.spinner("Improving text and generating feedback / 텍스트 개선 및 피드백 생성 중..."):
+            result = improve_text(user_input, language)
+        if result:
+            improved_version, feedback = parse_result(result)
+            
+            logging.info(f"Original text: {user_input}")
+            logging.info(f"Improved version: {improved_version}")
+            
+            if improved_version.strip() == user_input.strip():
+                st.warning("The model did not provide an improved version. Please try again or check the model settings.")
+            else:
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -109,14 +117,16 @@ def main():
                 with col2:
                     st.subheader("📌 Improved Version / 개선된 버전:")
                     st.write(improved_version)
-                
-                if feedback:
-                    st.subheader("📌 Feedback / 피드백:")
-                    st.write(feedback)
-                else:
-                    st.info("No specific feedback provided. / 구체적인 피드백이 제공되지 않았습니다.")
+            
+            if feedback:
+                st.subheader("📌 Feedback / 피드백:")
+                st.write(feedback)
+            else:
+                st.info("No specific feedback provided. / 구체적인 피드백이 제공되지 않았습니다.")
         else:
-            st.warning("Please enter some text / 텍스트를 입력해주세요.")
+            st.error("Failed to get an improvement. Please try again.")
+    else:
+        st.warning("Please enter some text / 텍스트를 입력해주세요.")
 
     with st.sidebar:
         st.header("ℹ️ How to Use / 사용 방법")
